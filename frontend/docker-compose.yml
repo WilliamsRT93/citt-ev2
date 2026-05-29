@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  frontend:
+    image: ${ECR_FRONTEND_URI:-citt-frontend}:${IMAGE_TAG:-latest}
+    container_name: citt-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      - NODE_ENV=production
+    networks:
+      - frontend-net
+
+networks:
+  frontend-net:
+    driver: bridge

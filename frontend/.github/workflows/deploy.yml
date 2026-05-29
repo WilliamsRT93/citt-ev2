@@ -1,0 +1,80 @@
+name: CI/CD Frontend - ITPCARGO CITT
+
+on:
+  push:
+    branches:
+      - deploy
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: citt-frontend
+  ECR_REGISTRY: 332579324003.dkr.ecr.us-east-1.amazonaws.com
+  EC2_INSTANCE_ID: i-0c1f82ee5e125b5eb
+
+jobs:
+  build-and-deploy:
+    name: Build → Push ECR → Deploy EC2 via SSM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build imagen Docker (multi-stage nginx, usuario no root)
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            --build-arg VITE_API_VENTAS_URL="" \
+            --build-arg VITE_API_DESPACHOS_URL="" \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+
+      - name: Push imagen a ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Deploy en EC2 via AWS SSM (sin SSH)
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 332579324003.dkr.ecr.us-east-1.amazonaws.com",
+              "docker pull 332579324003.dkr.ecr.us-east-1.amazonaws.com/citt-frontend:latest",
+              "docker stop innovatech-frontend 2>/dev/null || true",
+              "docker rm innovatech-frontend 2>/dev/null || true",
+              "docker stop citt-frontend 2>/dev/null || true",
+              "docker rm citt-frontend 2>/dev/null || true",
+              "docker run -d --name citt-frontend --restart unless-stopped -p 80:80 332579324003.dkr.ecr.us-east-1.amazonaws.com/citt-frontend:latest",
+              "docker ps | grep citt-frontend"
+            ]' \
+            --query 'Command.CommandId' --output text)
+          echo "SSM Command ID: $COMMAND_ID"
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$EC2_INSTANCE_ID"
+          STATUS=$(aws ssm list-command-invocations \
+            --command-id "$COMMAND_ID" \
+            --details \
+            --query 'CommandInvocations[0].Status' \
+            --output text)
+          echo "Deploy status: $STATUS"
+          if [ "$STATUS" != "Success" ]; then exit 1; fi
