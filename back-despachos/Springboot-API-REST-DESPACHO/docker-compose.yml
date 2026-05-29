@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: citt-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME:-citt_db}
+      MYSQL_USER: ${DB_USERNAME:-citt_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
+    command: --innodb-buffer-pool-size=128M
+    volumes:
+      - citt-mysql-data:/var/lib/mysql
+    networks:
+      - backend-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  despachos:
+    image: ${ECR_DESPACHOS_URI:-citt-backend-despachos}:${IMAGE_TAG:-latest}
+    container_name: citt-despachos
+    restart: unless-stopped
+    mem_limit: 300m
+    ports:
+      - "8081:8081"
+    environment:
+      DB_ENDPOINT: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-citt_db}
+      DB_USERNAME: ${DB_USERNAME:-citt_user}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JAVA_OPTS: "-Xms128m -Xmx256m"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - backend-net
+
+volumes:
+  citt-mysql-data:
+    name: citt-mysql-data
+
+networks:
+  backend-net:
+    name: citt-backend-net
+    driver: bridge
