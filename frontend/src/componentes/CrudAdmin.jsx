@@ -69,12 +69,12 @@ export const CrudAdmin = () => {
   };
 
   return (
-    <div className="grid grid-cols-[auto_1fr] min-h-screen bg-red-600">
+    <div className="grid grid-cols-[auto_1fr] min-h-screen bg-slate-100">
       <div className="col-span-1">
         <Navbar onSelect={setSeccion} seccionActiva={seccion} />
       </div>
 
-      <div className="overflow-y-auto p-6 bg-white">
+      <div className="overflow-y-auto p-6 bg-white rounded-tl-2xl shadow-inner">
         {renderContenido()}
         <Footer />
       </div>
